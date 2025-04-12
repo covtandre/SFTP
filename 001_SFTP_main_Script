@@ -9,7 +9,8 @@ function Show-Menu {
     Write-Host "4. Restart SSH Server"
     Write-Host "5. View SSHD Config"
     Write-Host "6. Add SFTP"
-    Write-Host "7. Exit"
+    Write-Host "7. Uninstall OpenSSH Server"
+    Write-Host "8. Exit"
 }
 
 function Install-OpenSSH {
@@ -18,13 +19,72 @@ function Install-OpenSSH {
         try {
             Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
             Write-Host "OpenSSH Server installed successfully." -ForegroundColor Green
+
+            # Set sshd service to start automatically
+            Set-Service -Name sshd -StartupType Automatic
+            # Start the sshd service
+            Start-Service -Name sshd
+            Write-Host "sshd service set to start automatically and started successfully." -ForegroundColor Green
         } catch {
             Write-Host "Failed to install OpenSSH Server: $_" -ForegroundColor Red
         }
     } else {
         Write-Host "OpenSSH Server is already installed." -ForegroundColor Yellow
+
+        # Ensure the service is set to automatic and started, even if already installed
+        Set-Service -Name sshd -StartupType Automatic -ErrorAction SilentlyContinue
+        Start-Service -Name sshd -ErrorAction SilentlyContinue
+        Write-Host "Ensured sshd service is set to automatic and running." -ForegroundColor Green
     }
 }
+
+function Uninstall-OpenSSH {
+    Write-Host "Starting OpenSSH Server uninstallation process..."
+
+    # Check if OpenSSH Server is installed
+    $openssh = Get-WindowsCapability -Online | Where-Object Name -like 'OpenSSH.Server*' | Where-Object State -eq 'Installed'
+
+    if ($openssh) {
+        # Stop the sshd service if it is running
+        $service = Get-Service -Name sshd -ErrorAction SilentlyContinue
+        if ($service -and $service.Status -eq 'Running') {
+            try {
+                Write-Host "Stopping sshd service..."
+                Stop-Service -Name sshd -Force
+                Write-Host "sshd service stopped successfully." -ForegroundColor Green
+            } catch {
+                Write-Host "Failed to stop sshd service: $_" -ForegroundColor Red
+            }
+        } else {
+            Write-Host "sshd service is not running or not found." -ForegroundColor Yellow
+        }
+
+        # Uninstall OpenSSH Server
+        try {
+            Remove-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+            Write-Host "OpenSSH Server uninstalled successfully." -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to uninstall OpenSSH Server: $_" -ForegroundColor Red
+        }
+
+        # Remove the SSH configuration folder
+        $sshFolder = "C:\ProgramData\ssh"
+        if (Test-Path $sshFolder) {
+            try {
+                Remove-Item -Path $sshFolder -Recurse -Force
+                Write-Host "Deleted SSH configuration folder: $sshFolder" -ForegroundColor Green
+            } catch {
+                Write-Host "Failed to delete SSH configuration folder: $_" -ForegroundColor Red
+            }
+        } else {
+            Write-Host "SSH configuration folder not found: $sshFolder" -ForegroundColor Yellow
+        }
+
+    } else {
+        Write-Host "OpenSSH Server is not installed." -ForegroundColor Yellow
+    }
+}
+
 
 function Start-SSHServer {
     Write-Host "Starting SSH Server..."
@@ -57,14 +117,20 @@ function Restart-SSHServer {
 }
 
 function View-SSHDConfig {
-    Write-Host "Viewing SSHD config..."
+    Write-Host "Opening SSHD config in Notepad (as Administrator)..."
     $sshdConfigPath = "$env:ProgramData\ssh\sshd_config"
     if (Test-Path $sshdConfigPath) {
-        Get-Content -Path $sshdConfigPath | Out-String | Write-Host
+        try {
+            Start-Process notepad.exe $sshdConfigPath -Verb RunAs
+            Write-Host "Notepad opened as administrator." -ForegroundColor Green
+        } catch {
+            Write-Host "Failed to open Notepad as administrator: $_" -ForegroundColor Red
+        }
     } else {
         Write-Host "SSHD config file not found." -ForegroundColor Red
     }
 }
+
 
 function Add-SFTP {
     Write-Host "Adding SFTP functionality..."
@@ -90,12 +156,12 @@ function Add-SFTP {
 
         if ($matchIndex -ge 0) {
             # Insert the new SFTP configuration entry before the "Match All" line
-            $entry = "Match User $selectedUser`r`n    PasswordAuthentication yes`r`n    ChrootDirectory $selectedPath`r`n    ForceCommand sftp-server.exe -d priv"
+            $entry = "Match User $selectedUserrn    PasswordAuthentication yesrn    ChrootDirectory $selectedPathrn    ForceCommand sftp-server.exe -d priv"
             $sshdConfig = $sshdConfig[0..($matchIndex-1)] + $entry + $sshdConfig[$matchIndex..($sshdConfig.Length - 1)]
         } else {
             Write-Host "'Match All' expression not found. Appending to the end of the file." -ForegroundColor Yellow
             # If "Match All" is not found, add the entry at the end
-            $entry = "Match User $selectedUser`r`n    PasswordAuthentication yes`r`n    ChrootDirectory $selectedPath`r`n    ForceCommand sftp-server.exe -d priv"
+            $entry = "Match User $selectedUserrn    PasswordAuthentication yesrn    ChrootDirectory $selectedPathrn    ForceCommand sftp-server.exe -d priv"
             $sshdConfig += $entry
         }
 
@@ -135,12 +201,12 @@ function Add-SFTP {
 
         if ($matchIndex -ge 0) {
             # Insert the new SFTP configuration entry before the "Match All" line
-            $entry = "Match Group $selectedGroup`r`n    PasswordAuthentication yes`r`n    ChrootDirectory $selectedPath`r`n    ForceCommand sftp-server.exe -d priv"
+            $entry = "Match Group $selectedGrouprn    PasswordAuthentication yesrn    ChrootDirectory $selectedPathrn    ForceCommand sftp-server.exe -d priv"
             $sshdConfig = $sshdConfig[0..($matchIndex-1)] + $entry + $sshdConfig[$matchIndex..($sshdConfig.Length - 1)]
         } else {
             Write-Host "'Match All' expression not found. Appending to the end of the file." -ForegroundColor Yellow
             # If "Match All" is not found, add the entry at the end
-            $entry = "Match Group $selectedGroup`r`n    PasswordAuthentication yes`r`n    ChrootDirectory $selectedPath`r`n    ForceCommand sftp-server.exe -d priv"
+            $entry = "Match Group $selectedGrouprn    PasswordAuthentication yesrn    ChrootDirectory $selectedPathrn    ForceCommand sftp-server.exe -d priv"
             $sshdConfig += $entry
         }
 
@@ -171,7 +237,7 @@ function Add-SFTP {
 # Main Loop
 do {
     Show-Menu
-    $choice = Read-Host "Select an option (1-7)"
+    $choice = Read-Host "Select an option (1-8)"
 
     switch ($choice) {
         1 { Install-OpenSSH }
@@ -180,7 +246,8 @@ do {
         4 { Restart-SSHServer }
         5 { View-SSHDConfig }
         6 { Add-SFTP }
-        7 { Write-Host "Exiting..." -ForegroundColor Yellow }
+        7 { Uninstall-OpenSSH }
+        8 { Write-Host "Exiting..." -ForegroundColor Yellow }
         default { Write-Host "Invalid choice. Please select a valid option." -ForegroundColor Red }
     }
 } while ($choice -ne 7)
